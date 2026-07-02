@@ -41,4 +41,5 @@ Every push to `main` triggers the **Robot Framework Tests** workflow, which:
 
 1. Runs the tests headless on Ubuntu (excluding tests tagged `local-only`).
 2. Prints a pass/fail summary on the workflow run page.
-3. Uploads `report.html`, `log.html`, and `output.xml` as the **robot-framework-reports** artifact, which you can download from the run page.
+3. Publishes the reports to GitHub Pages: **https://mmdmirh.github.io/ai-test-automation/** — a summary page with links to the full `report.html` and `log.html` from the latest run.
+4. Also uploads `report.html`, `log.html`, and `output.xml` as the **robot-framework-reports** artifact on the run page.

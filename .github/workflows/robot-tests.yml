@@ -7,6 +7,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -25,7 +30,7 @@ jobs:
       - name: Run Robot Framework tests
         # The demo suite contains a deliberately failing test, so robot exits
         # non-zero. continue-on-error keeps the workflow going so the reports
-        # are still generated and uploaded.
+        # are still generated and published.
         continue-on-error: true
         run: >
           robot
@@ -34,13 +39,84 @@ jobs:
           --exclude local-only
           tests
 
-      - name: Upload test reports
+      - name: Add landing page for reports
+        if: always()
+        run: |
+          python - <<'EOF'
+          from xml.etree import ElementTree as ET
+          import datetime
+
+          root = ET.parse("results/output.xml").getroot()
+          stats = root.find("statistics/total/stat")
+          passed, failed = stats.get("pass"), stats.get("fail")
+          generated = root.get("generated", "")
+
+          rows = ""
+          for test in root.iter("test"):
+              status = test.find("status").get("status")
+              ok = status == "PASS"
+              rows += (
+                  f'<tr><td>{test.get("name")}</td>'
+                  f'<td class="{"pass" if ok else "fail"}">'
+                  f'{"✅" if ok else "❌"} {status}</td></tr>\n'
+              )
+
+          html = f"""<!DOCTYPE html>
+          <html lang="en">
+          <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Robot Framework Test Reports</title>
+          <style>
+            body {{ font-family: system-ui, sans-serif; max-width: 700px; margin: 3rem auto; padding: 0 1rem; color: #222; }}
+            h1 {{ font-size: 1.5rem; }}
+            .summary {{ display: flex; gap: 1rem; margin: 1.5rem 0; }}
+            .card {{ border-radius: 8px; padding: 1rem 1.5rem; font-size: 1.2rem; font-weight: 600; }}
+            .card.pass {{ background: #e6f4ea; color: #1e7e34; }}
+            .card.fail {{ background: #fdecea; color: #c0392b; }}
+            table {{ border-collapse: collapse; width: 100%; margin: 1rem 0 2rem; }}
+            th, td {{ text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #ddd; }}
+            td.pass {{ color: #1e7e34; }}
+            td.fail {{ color: #c0392b; }}
+            .links a {{ display: inline-block; margin-right: 1rem; font-size: 1.05rem; }}
+            .meta {{ color: #777; font-size: 0.85rem; margin-top: 2rem; }}
+          </style>
+          </head>
+          <body>
+          <h1>Robot Framework Test Reports</h1>
+          <div class="summary">
+            <div class="card pass">✅ {passed} passed</div>
+            <div class="card fail">❌ {failed} failed</div>
+          </div>
+          <table>
+            <tr><th>Test</th><th>Status</th></tr>
+            {rows}
+          </table>
+          <div class="links">
+            <a href="report.html">📊 Full report</a>
+            <a href="log.html">📝 Detailed log</a>
+          </div>
+          <p class="meta">Generated {generated} — updated on every push to <code>main</code>.</p>
+          </body>
+          </html>"""
+
+          with open("results/index.html", "w") as f:
+              f.write(html)
+          EOF
+
+      - name: Upload test reports artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: robot-framework-reports
           path: results/
           if-no-files-found: error
+
+      - name: Upload Pages artifact
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: results/
 
       - name: Publish test summary
         if: always()
@@ -61,5 +137,18 @@ jobs:
               icon = "✅" if status == "PASS" else "❌"
               print(f"| {test.get('name')} | {icon} {status} |")
           print()
-          print("Full `report.html` and `log.html` are in the **robot-framework-reports** artifact.")
+          print("Reports are published to GitHub Pages: https://mmdmirh.github.io/ai-test-automation/")
           EOF
+
+  deploy-reports:
+    # Publish the reports to GitHub Pages (only for pushes to main)
+    if: always() && github.event_name != 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
