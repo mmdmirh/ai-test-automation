@@ -1,0 +1,65 @@
+name: Robot Framework Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Robot Framework tests
+        # The demo suite contains a deliberately failing test, so robot exits
+        # non-zero. continue-on-error keeps the workflow going so the reports
+        # are still generated and uploaded.
+        continue-on-error: true
+        run: >
+          robot
+          --outputdir results
+          --variable HEADLESS:True
+          --exclude local-only
+          tests
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: robot-framework-reports
+          path: results/
+          if-no-files-found: error
+
+      - name: Publish test summary
+        if: always()
+        run: |
+          python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          from xml.etree import ElementTree as ET
+          root = ET.parse("results/output.xml").getroot()
+          stats = root.find("statistics/total/stat")
+          passed, failed = stats.get("pass"), stats.get("fail")
+          print("## Robot Framework Results")
+          print(f"- ✅ Passed: {passed}")
+          print(f"- ❌ Failed: {failed}")
+          print()
+          print("| Test | Status |")
+          print("|------|--------|")
+          for test in root.iter("test"):
+              status = test.find("status").get("status")
+              icon = "✅" if status == "PASS" else "❌"
+              print(f"| {test.get('name')} | {icon} {status} |")
+          print()
+          print("Full `report.html` and `log.html` are in the **robot-framework-reports** artifact.")
+          EOF
